@@ -1,0 +1,11 @@
+{
+  "name": "carbon-sketch",
+  "version": "0.0.1",
+  "description": "Userscript adding carbon info to sketch cloud",
+  "author": "Alexander French",
+  "license": "Unlicense",
+  "dependencies": {
+    "eslint": "^7.2.0",
+    "prettier-eslint": "^11.0.0"
+  }
+}
