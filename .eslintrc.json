@@ -39,6 +39,7 @@
         "function-call-argument-newline": [
             "error",
             "consistent"
-        ]
+        ],
+        "semi": 1
     }
 }

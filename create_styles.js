@@ -28,7 +28,10 @@ const OUT_PATH = "styles.js";
 
     // Optimize object structure for searching by value
     for (const [name, value] of Object.entries(styles.colors)) {
-        styles[value] = name;
+        if (!styles[value]) {
+            styles[value] = [];
+        }
+        styles[value].push(name);
     }
     delete styles.colors;
     for (const [name, info] of Object.entries(styles.fonts)) {

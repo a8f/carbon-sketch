@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name     Carbon Sketch
 // @version  0.0.1
-// @include  /https?:\/\/www\.sketch\.com\/s\/.*#Inspector/
+// @include  /https?:\/\/www\.sketch\.com\/s\/.*/
+// @updateURL TODO
+// @downloadURL TODO
+// @namespace Alexander French
 // @run-at document-start
 // ==/UserScript==
 
 const STRINGS = {
-    //typeface: "Typeface", // TODO make this work
+    typeface: "Typeface",
     text: "TEXT:",
     weight: "Weight",
     size: "Size",
@@ -52,8 +55,14 @@ function panelCreated(tabNodes) {
             }
             else if (mutation.type === "characterData" &&
                 mutation.target &&
-                NAMES[mutation.target.textContent.split(":")[0]]) {
-                handlePanelNode(mutation.target.parentElement.parentElement.parentElement.parentElement);
+                mutation.target.textContent &&
+                mutation.target.parentElement.parentElement.parentElement.parentElement
+            ) {
+                if (NAMES[mutation.target.textContent.split(":")[0]] ||
+                    mutation.target.textContent.match(/#[a-f\d]+/i)
+                ) {
+                    handlePanelNode(mutation.target.parentElement.parentElement.parentElement.parentElement);
+                }
             }
         });
     });
@@ -76,58 +85,132 @@ function handlePanelNode(node) {
     if (typeof data !== "object") return;
     if (data.type === "fonts") {
         const container = node.childNodes[node.childNodes.length - 1].childNodes[1];
-        const newNode = container.firstElementChild.cloneNode(true);
-        newNode.style.maxWidth = window.getComputedStyle(newNode).width
+        let newNode = document.querySelector("div[id='carbon-text-info']");
+        let exists = true;
+        if (!newNode) {
+            newNode = container.firstElementChild.cloneNode(true);
+            exists = false;
+        }
+        newNode.style.maxWidth = window.getComputedStyle(newNode).width;
+        newNode.id = "carbon-text-info";
         newNode.childNodes[0].innerText = "Carbon";
         newNode.childNodes[1].innerText = data.fonts.join(",\n");
         newNode.childNodes[1].title = "Carbon";
         newNode.childNodes[1].classList = [];
-        newNode.childNodes[2].remove(); // TODO support copying to clipboard
-        container.insertBefore(newNode, container.firstElementChild);
+        if (newNode.childNodes[2]) {
+            newNode.childNodes[2].remove(); // TODO support copying to clipboard
+        }
+        if (!exists) {
+            container.insertBefore(newNode, container.firstElementChild);
+        }
     }
 }
 
 function getNodeData(node) {
     if (!node) return node;
+    // Text content
     if (node.lastElementChild && node.lastElementChild.childNodes.length > 1) {
         const innerText = node.lastElementChild.firstElementChild.innerText;
         if (innerText && innerText.startsWith(STRINGS.text)) {
             const infoDivs = node.lastElementChild.childNodes[1].childNodes;
             let possibleFonts = null;
+            let prefPrefix = null;
+            const deleteIndices = {};
             infoDivs.forEach((div) => {
                 if (div.childNodes.length < 2) return;
                 const attr = div.firstElementChild && NAMES[div.firstElementChild.innerText];
                 if (!attr) return;
                 const text = div.childNodes[1].innerText;
-                let data;
-                switch (attr) {
-                case "typeface":
-                    data = text;
-                    break;
-                case "weight":
-                    data = text.split(" (")[1].replace(")", "");
-                    break;
-                case "size":
-                case "character":
-                    data = text + "px";
-                    break;
-                case "lineHeight":
-                    data = text.split(" (")[0] + "px";
-                    break;
-                default:
-                    return;
-                }
-                if (styles[attr][data]) {
-                    if (!possibleFonts) {
-                        possibleFonts = styles[attr][data];
-                    } else {
-                        possibleFonts = possibleFonts.filter((font) => styles[attr][data].indexOf(font) !== -1)
+                if (attr === "typeface") {
+                    switch (text) {
+                    case "IBM Plex Sans":
+                        prefPrefix = "productive";
+                        break;
+                    case "IBM Plex Mono":
+                        prefPrefix = "code";
+                        break;
+                    }
+                } else if (attr === "color") {
+                    const lower = text.toLowerCase();
+                    if (styles[lower]) {
+                        const textColor = styles[lower].find((style) => style.startsWith("text"));
+                        const newNode = div.childNodes[1].cloneNode(true);
+                        newNode.innerHTML = (textColor || styles[lower].join("<br>")) + "&nbsp;";
+                        newNode.id = "carbon-color";
+                        newNode.classList.add("carbon-text-color");
+                        div.insertBefore(newNode, div.childNodes[1]);
+                    }
+                } else {
+                    let data;
+                    switch (attr) {
+                    case "weight":
+                        data = text.split(" (")[1].replace(")", "");
+                        break;
+                    case "size":
+                    case "character":
+                        data = text + "px";
+                        break;
+                    case "lineHeight":
+                        data = text.split(" (")[0] + "px";
+                        break;
+                    default:
+                        return;
+                    }
+                    if (styles[attr][data]) {
+                        if (!possibleFonts) {
+                            possibleFonts = styles[attr][data];
+                        } else {
+                            possibleFonts = possibleFonts.filter((font) => styles[attr][data].indexOf(font) !== -1);
+                        }
                     }
                 }
             });
             if (possibleFonts && possibleFonts.length) {
-                return {type: "fonts", fonts: possibleFonts};
+                if (possibleFonts.length > 1 && prefPrefix) {
+                    const sorted = possibleFonts.sort((a, b) => a.length > b.length);
+                    const base = sorted[0];
+                    let foundPref = false;
+                    sorted.slice(1).forEach((font) => {
+                        if (font.endsWith(base)) {
+                            if (font.startsWith(prefPrefix)) {
+                                foundPref = true;
+                                deleteIndices[possibleFonts.indexOf(base)] = true;
+                            } else if (foundPref) {
+                                deleteIndices[possibleFonts.indexOf(base)] = true;
+                            }
+                        }
+                    });
+                }
+                return {type: "fonts", fonts: possibleFonts.filter((font, i) => (!deleteIndices[i] && Boolean(font)))};
             }
         }
     }
+    // Colors - just replace inline (doesn't return value)
+    if (node.getElementsByTagName && !node.querySelector("div[id='carbon-text-info']")) {
+        let found;
+        const divs = Array.from(node.getElementsByTagName("div"));
+        divs.forEach((div) => {
+            if (div.innerText && div.innerText.match(/#[a-f\d]+/i)) {
+                const lower = div.innerText.toLowerCase();
+                if (styles[lower]) {
+                    let exists = true;
+                    const newNode = div.parentElement.parentElement.querySelector("div[id='carbon-color']") ||
+                        (exists = false) || div.cloneNode(true);
+                    if (exists && newNode.classList.contains("carbon-text-color")) {
+                        const textColor = styles[lower].find((style) => style.startsWith("text"));
+                        newNode.innerHTML = (textColor || styles[lower].join("<br>")) + "&nbsp;";
+                    } else {
+                        newNode.innerHTML = styles[lower].join("<br>");
+                    }
+                    newNode.id = "carbon-color";
+                    if (!exists) {
+                        div.parentElement.insertBefore(newNode, div);
+                    }
+                    found = true;
+                }
+            }
+        });
+        if (found) return;
+    }
+    // TODO spacing
 }
